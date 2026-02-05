@@ -7,5 +7,5 @@ if(USE_DOUBLE)
     add_definitions(-DUSE_DOUBLE)
 endif()
 
-add_executable(sinesum main.cpp)
-target_compile_features(sinesum PRIVATE cxx_std_11)
+add_executable(main main.cpp)
+target_compile_features(main PRIVATE cxx_std_11)
