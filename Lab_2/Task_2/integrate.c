@@ -5,13 +5,14 @@
 
 
 #ifndef NUM_THREADS
-#define NUM_THREADS 40
+#define NUM_THREADS 1
 #endif
 
 const double PI = 3.14159265358979323846;
 const double a = -4.0;
 const double b = 4.0;
 const int nsteps = 40000000;
+
 
 double cpuSecond()
 {

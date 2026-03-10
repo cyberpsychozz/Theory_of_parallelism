@@ -28,7 +28,6 @@ double cpuSecond()
     return ((double)ts.tv_sec + (double)ts.tv_nsec * 1.e-9);
 }
 
-//###############################################РИЧАРДСОН SERIAL########################################################################
 void richardson_serial(const std::vector<double>& A, const std::vector<double>& b, std::vector<double>& x, int n)
 {
     const double tau = 0.01;
