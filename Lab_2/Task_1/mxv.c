@@ -6,6 +6,7 @@
 
 #ifndef NUM_THREADS
 #define NUM_THREADS 40
+
 #endif
 
 #ifndef M_SIZE
@@ -16,6 +17,7 @@
 #define N_SIZE 40000
 #endif
 
+double t_serial, t_parallel;
 
 double cpuSecond()
 {
@@ -37,27 +39,6 @@ void matrix_vector_product(double *a, double *b, double *c, size_t m, size_t n)
             c[i] += a[i * n + j] * b[j];
     }
 }
-
-// void matrix_vector_product_omp(double *a, double *b, double *c, size_t m, size_t n)
-// {
-// #pragma omp parallel
-//     {
-//         double t = omp_get_wtime();
-//         int nthreads = omp_get_num_threads();
-//         int threadid = omp_get_thread_num();
-//         int items_per_thread = m / nthreads;
-//         int lb = threadid * items_per_thread;
-//         int ub = (threadid == nthreads - 1) ? (m - 1) : (lb + items_per_thread - 1);
-//         for (int i = lb; i <= ub; i++)
-//         {
-//             c[i] = 0.0;
-//             for (int j = 0; j < n; j++)
-//                 c[i] += a[i * n + j] * b[j];
-//         }
-//         t = omp_get_wtime() - t;
-//         printf("Thread %d items %d [%d - %d], time: %.6f\n", threadid, ub - lb + 1, lb, ub, t);
-//     }
-// }
 
 /*
     matrix_vector_product_omp: Compute matrix-vector product c[m] = a[m][n] * b[n]
@@ -105,11 +86,11 @@ void run_serial(size_t n, size_t m)
     for (size_t j = 0; j < n; j++)
         b[j] = j;
 
-    double t = cpuSecond();
+    t_serial = cpuSecond();
     matrix_vector_product(a, b, c, m, n);
-    t = cpuSecond() - t;
+    t_serial = cpuSecond() - t_serial;
 
-    printf("Elapsed time (serial): %.6f sec.\n", t);
+    printf("Elapsed time (serial): %.6f sec.\n", t_serial);
     free(a);
     free(b);
     free(c);
@@ -151,11 +132,11 @@ void run_parallel(size_t n, size_t m)
     for (size_t j = 0; j < n; j++)  
         b[j] = j;
     
-    double t = cpuSecond();
+    t_parallel = cpuSecond();
     matrix_vector_product_omp(a, b, c, m, n);
-    t = cpuSecond() - t;
+    t_parallel = cpuSecond() - t_parallel;
 
-    printf("Elapsed time (parallel): %.6f sec.\n", t);
+    printf("Elapsed time (parallel): %.6f sec.\n", t_parallel);
     free(a);
     free(b);
     free(c);
@@ -173,6 +154,7 @@ int main(int argc, char *argv[])
 
     run_serial(N, M);
     run_parallel(N, M);
+    printf("Acceleration coeficient: %.6f\n", t_serial/t_parallel);
 
     return 0;
 }
