@@ -82,10 +82,12 @@ void richardson_omp_separate(const std::vector<double>& A, const std::vector<dou
     int iter = 0;
     double residual_norm = 1.0;
 
+    int num_threads = omp_get_max_threads();
+
     while (iter < MAX_ITER && (residual_norm / b_norm) > EPS){
         residual_norm = 0.0;
 
-#pragma omp parallel for num_threads(NUM_THREADS)
+#pragma omp parallel for num_threads(num_threads)
         for (int i = 0; i < n; i++){
 
             double Ax = 0.0;
@@ -97,7 +99,7 @@ void richardson_omp_separate(const std::vector<double>& A, const std::vector<dou
             x[i] += tau * r;
         }
 
-#pragma omp parallel for num_threads(NUM_THREADS)
+#pragma omp parallel for num_threads(num_threads)
         for (int i = 0; i < n; i++){
             
             double r = b[i];
@@ -142,10 +144,12 @@ void richardson_omp_one(const std::vector<double>& A, const std::vector<double>&
     int iter = 0;
     double residual_norm = 1.0;
 
+    int num_threads = omp_get_max_threads();
+
     while (iter < MAX_ITER && (residual_norm / b_norm) > EPS){
         residual_norm = 0.0;
 
-#pragma omp parallel num_threads(NUM_THREADS)
+#pragma omp parallel num_threads(num_threads)
        {
             int nthreads = omp_get_num_threads();
             int threadid = omp_get_thread_num();
@@ -261,6 +265,10 @@ int main(int argc, char** argv)
     int n = N_SIZE;
     if (argc > 1) n = std::atoi(argv[1]);
 
+    int num_threads = NUM_THREADS;
+    char* env_threads = std::getenv("OMP_NUM_THREADS");
+    if (env_threads) num_threads = std::atoi(env_threads);
+
     std::vector<double> A(n * n);
     std::vector<double> b(n);
 
@@ -276,9 +284,8 @@ int main(int argc, char** argv)
     b_norm = std::sqrt(b_norm);
 
     std::cout << "Решение системы Ax=b методом простой итерации (Ричардсона)\n";
-    std::cout << "Размерность N = " << n << ", MAX_ITER = " << MAX_ITER << ", EPS = " << EPS << "N_THREADS = " << NUM_THREADS << "\n\n";
+    std::cout << "Размерность N = " << n << ", MAX_ITER = " << MAX_ITER << ", EPS = " << EPS << ", Потоков = " << num_threads << "\n\n";
 
-    //run_serial(A, b, n);
     run_omp_separate(A, b, n, b_norm);
     run_omp_one(A, b, n, b_norm);
 
