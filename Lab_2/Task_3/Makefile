@@ -2,7 +2,7 @@ CXX = g++
 CXXFLAGS = -Wall -Wextra -O3 -fopenmp
 
 TARGET = system_solution
-SRC = system_solution.c
+SRC = system_solution.cpp
 
 all: $(TARGET)
 
