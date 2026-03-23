@@ -6,11 +6,11 @@
 #include <omp.h>
 
 #ifndef N_SIZE
-#define N_SIZE 10000
+#define N_SIZE 2000
 #endif
 
 #ifndef NUM_THREADS
-#define NUM_THREADS 40
+#define NUM_THREADS 8
 #endif
 
 #ifndef MAX_ITER
@@ -293,16 +293,16 @@ int main(int argc, char** argv)
     std::cout << "=== Исследование schedule для метода Ричардсона ===\n";
     std::cout << "N = " << n << " | Потоков = " << NUM_THREADS << "\n\n";
 
-    // run_schedule_test(A, b, n, "static", b_norm);
-    // run_schedule_test(A, b, n, "static,1", b_norm);
-    // run_schedule_test(A, b, n, "static,32", b_norm);
-    // run_schedule_test(A, b, n, "static,128", b_norm);
-    // run_schedule_test(A, b, n, "dynamic", b_norm);
-    // run_schedule_test(A, b, n, "dynamic,8", b_norm);
-    // run_schedule_test(A, b, n, "dynamic,32", b_norm);
-    // run_schedule_test(A, b, n, "guided", b_norm);
-    // run_schedule_test(A, b, n, "guided,16", b_norm);
-    // run_schedule_test(A, b, n, "auto", b_norm);
+    run_schedule_test(A, b, n, "static", b_norm);
+    run_schedule_test(A, b, n, "static,1", b_norm);
+    run_schedule_test(A, b, n, "static,32", b_norm);
+    run_schedule_test(A, b, n, "static,128", b_norm);
+    run_schedule_test(A, b, n, "dynamic", b_norm);
+    run_schedule_test(A, b, n, "dynamic,8", b_norm);
+    run_schedule_test(A, b, n, "dynamic,32", b_norm);
+    run_schedule_test(A, b, n, "guided", b_norm);
+    run_schedule_test(A, b, n, "guided,16", b_norm);
+    run_schedule_test(A, b, n, "auto", b_norm);
 
     return 0;
 }
