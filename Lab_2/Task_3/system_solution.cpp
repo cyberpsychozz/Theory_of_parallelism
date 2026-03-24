@@ -3,6 +3,7 @@
 #include <vector>
 #include <cmath>
 #include <ctime>
+#include <cstdlib>
 #include <omp.h>
 
 #ifndef N_SIZE
@@ -21,288 +22,247 @@
 #define EPS 1e-5
 #endif
 
-double cpuSecond()
-{
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return ((double)ts.tv_sec + (double)ts.tv_nsec * 1.e-9);
+double get_wall_time() {
+    struct timespec time_spec;
+    timespec_get(&time_spec, TIME_UTC);
+    return static_cast<double>(time_spec.tv_sec) + static_cast<double>(time_spec.tv_nsec) * 1e-9;
 }
 
-//###############################################РИЧАРДСОН SERIAL########################################################################
-void richardson_serial(const std::vector<double>& A, const std::vector<double>& b, std::vector<double>& x, int n, double b_norm)
-{
-    const double tau = 0.01;
-    int iter = 0;
-    double residual_norm = 1.0;
+void solve_serial(const std::vector<double>& matrix, const std::vector<double>& rhs, std::vector<double>& sol, int dim, double rhs_norm) {
+    const double param_tau = 0.01;
+    int step = 0;
+    double current_residual = 1.0;
 
-    while (iter < MAX_ITER && (residual_norm / b_norm) > EPS){
-        residual_norm = 0.0;
-        for (int i = 0; i < n; i++){
-
-            double Ax = 0.0;
-            for (int j = 0; j < n; j++){
-                Ax += A[i * n + j] * x[j];
+    while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
+        current_residual = 0.0;
+        for (int i = 0; i < dim; ++i) {
+            double mx = 0.0;
+            for (int j = 0; j < dim; ++j) {
+                mx += matrix[i * dim + j] * sol[j];
             }
-
-            double r = b[i] - Ax;
-            x[i] += tau * r;
-            residual_norm += r * r;
+            double diff = rhs[i] - mx;
+            sol[i] += param_tau * diff;
+            current_residual += diff * diff;
         }
-        residual_norm = std::sqrt(residual_norm);
-        iter++;
+        current_residual = std::sqrt(current_residual);
+        step++;
     }
-    std::cout << "Метод простой итерации (serial) завершился за " << iter << " итераций, норма = " << std::scientific << (residual_norm / b_norm) << "\n";
+    std::cout << "[Serial] Completed in " << step << " iterations, rel_norm = " << std::scientific << (current_residual / rhs_norm) << "\n";
 }
 
-void run_serial(const std::vector<double>& A, const std::vector<double>& b, int n, double b_norm)
-{
-    std::vector<double> x(n, 0.0);
+void test_serial(const std::vector<double>& matrix, const std::vector<double>& rhs, int dim, double rhs_norm) {
+    std::vector<double> sol(dim, 0.0);
 
-    double t = cpuSecond();
-    richardson_serial(A, b, x, n, b_norm);
-    t = cpuSecond() - t;
+    double start_time = get_wall_time();
+    solve_serial(matrix, rhs, sol, dim, rhs_norm);
+    double end_time = get_wall_time() - start_time;
 
     double max_err = 0.0;
-    for (int i = 0; i < n; i++){
-        if (std::fabs(x[i] - 1.0) > max_err) max_err = std::fabs(x[i] - 1.0);
+    for (int i = 0; i < dim; ++i) {
+        double err = std::fabs(sol[i] - 1.0);
+        if (err > max_err) max_err = err;
     }
 
-    std::cout << "Время выполнения (serial): " << std::fixed << std::setprecision(6) << t << " сек.\n";
-    std::cout << "Максимальная ошибка (serial): " << std::scientific << max_err << "\n\n";
+    std::cout << "  Execution time: " << std::fixed << std::setprecision(6) << end_time << " s\n";
+    std::cout << "  Max error: " << std::scientific << max_err << "\n\n";
 }
-//###########################################################################################################################################
 
+void solve_omp_split(const std::vector<double>& matrix, const std::vector<double>& rhs, std::vector<double>& sol, int dim, double rhs_norm) {
+    const double param_tau = 0.01;
+    int step = 0;
+    double current_residual = 1.0;
+    int n_threads = omp_get_max_threads();
 
+    while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
+        current_residual = 0.0;
 
-
-//###############################################РИЧАРДСОН SEPARATE########################################################################
-void richardson_omp_separate(const std::vector<double>& A, const std::vector<double>& b, std::vector<double>& x, int n, double b_norm)
-{
-    const double tau = 0.01;
-    int iter = 0;
-    double residual_norm = 1.0;
-
-    int num_threads = omp_get_max_threads();
-
-    while (iter < MAX_ITER && (residual_norm / b_norm) > EPS){
-        residual_norm = 0.0;
-
-#pragma omp parallel for num_threads(num_threads)
-        for (int i = 0; i < n; i++){
-
-            double Ax = 0.0;
-            for (int j = 0; j < n; j++){
-                Ax += A[i*n + j] * x[j];
+#pragma omp parallel for num_threads(n_threads)
+        for (int i = 0; i < dim; ++i) {
+            double mx = 0.0;
+            for (int j = 0; j < dim; ++j) {
+                mx += matrix[i * dim + j] * sol[j];
             }
-            
-            double r = b[i] - Ax;
-            x[i] += tau * r;
+            sol[i] += param_tau * (rhs[i] - mx);
         }
 
-#pragma omp parallel for num_threads(num_threads)
-        for (int i = 0; i < n; i++){
-            
-            double r = b[i];
-            for (int j = 0; j < n; j++) r -= A[i*n + j] * x[j];
-            double diff = r * r;
+#pragma omp parallel for num_threads(n_threads) reduction(+:current_residual)
+        for (int i = 0; i < dim; ++i) {
+            double diff = rhs[i];
+            for (int j = 0; j < dim; ++j) {
+                diff -= matrix[i * dim + j] * sol[j];
+            }
+            current_residual += diff * diff;
+        }
+
+        current_residual = std::sqrt(current_residual);
+        step++;
+    }
+    std::cout << "[OMP Split For] Completed in " << step << " iterations, rel_norm = " << std::scientific << (current_residual / rhs_norm) << "\n";
+}
+
+void test_omp_split(const std::vector<double>& matrix, const std::vector<double>& rhs, int dim, double rhs_norm) {
+    std::vector<double> sol(dim, 0.0);
+
+    double start_time = get_wall_time();
+    solve_omp_split(matrix, rhs, sol, dim, rhs_norm);
+    double end_time = get_wall_time() - start_time;
+
+    double max_err = 0.0;
+    for (int i = 0; i < dim; ++i) {
+        double err = std::fabs(sol[i] - 1.0);
+        if (err > max_err) max_err = err;
+    }
+
+    std::cout << "  Execution time: " << std::fixed << std::setprecision(6) << end_time << " s\n";
+    std::cout << "  Max error: " << std::scientific << max_err << "\n\n";
+}
+
+void solve_omp_single_region(const std::vector<double>& matrix, const std::vector<double>& rhs, std::vector<double>& sol, int dim, double rhs_norm) {
+    const double param_tau = 0.01;
+    int step = 0;
+    double current_residual = 1.0;
+    int n_threads = omp_get_max_threads();
+
+    while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
+        current_residual = 0.0;
+
+#pragma omp parallel num_threads(n_threads)
+        {
+            int t_count = omp_get_num_threads();
+            int t_id = omp_get_thread_num();
+            int chunk_size = dim / t_count;
+            int start_idx = t_id * chunk_size;
+            int end_idx = (t_id == t_count - 1) ? (dim - 1) : (start_idx + chunk_size - 1);
+
+            double local_res = 0.0;
+            for (int i = start_idx; i <= end_idx; ++i) {
+                double mx = 0.0;
+                for (int j = 0; j < dim; ++j) {
+                    mx += matrix[i * dim + j] * sol[j];
+                }
+                double diff = rhs[i] - mx;
+                sol[i] += param_tau * diff;
+                local_res += diff * diff;
+            }
 
 #pragma omp atomic
-            residual_norm += diff;
+            current_residual += local_res;
         }
-
-        residual_norm = std::sqrt(residual_norm);
-        iter++;
+        current_residual = std::sqrt(current_residual);
+        step++;
     }
-    std::cout << "Метод простой итерации (separate parallel for) завершился за " << iter << " итераций, норма = " << std::scientific << (residual_norm / b_norm) << "\n";
+    std::cout << "[OMP Single Region] Completed in " << step << " iterations, rel_norm = " << std::scientific << (current_residual / rhs_norm) << "\n";
 }
 
-void run_omp_separate(const std::vector<double>& A, const std::vector<double>& b, int n, double b_norm)
-{
-    std::vector<double> x(n, 0.0);
+void test_omp_single_region(const std::vector<double>& matrix, const std::vector<double>& rhs, int dim, double rhs_norm) {
+    std::vector<double> sol(dim, 0.0);
 
-    double t = cpuSecond();
-    richardson_omp_separate(A, b, x, n, b_norm);
-    t = cpuSecond() - t;
+    double start_time = get_wall_time();
+    solve_omp_single_region(matrix, rhs, sol, dim, rhs_norm);
+    double end_time = get_wall_time() - start_time;
 
     double max_err = 0.0;
-    for (int i = 0; i < n; i++){
-        if (std::fabs(x[i] - 1.0) > max_err) max_err = std::fabs(x[i] - 1.0);
+    for (int i = 0; i < dim; ++i) {
+        double err = std::fabs(sol[i] - 1.0);
+        if (err > max_err) max_err = err;
     }
 
-
-    std::cout << "Время выполнения (omp_separate): " << std::fixed << std::setprecision(6) << t << " сек.\n";
-    std::cout << "Максимальная ошибка (omp_separate): " << std::scientific << max_err << "\n\n";
-}
-//###########################################################################################################################################
-
-
-
-//###############################################РИЧАРДСОН ONE########################################################################
-void richardson_omp_one(const std::vector<double>& A, const std::vector<double>& b, std::vector<double>& x, int n, double b_norm)
-{
-    const double tau = 0.01;
-    int iter = 0;
-    double residual_norm = 1.0;
-
-    int num_threads = omp_get_max_threads();
-
-    while (iter < MAX_ITER && (residual_norm / b_norm) > EPS){
-        residual_norm = 0.0;
-
-#pragma omp parallel num_threads(num_threads)
-       {
-            int nthreads = omp_get_num_threads();
-            int threadid = omp_get_thread_num();
-            int items_per_thread = n / nthreads;
-            int lb = threadid * items_per_thread;
-            int ub = (threadid == nthreads - 1) ? (n - 1) : (lb + items_per_thread - 1);
-
-            double norm_local = 0.0;
-            for (int i = lb; i <= ub; i++){
-
-                double Ax = 0.0;
-                for (int j = 0; j < n; j++){
-                    Ax += A[i*n + j] * x[j];
-                }
-
-                double r = b[i] - Ax;
-                x[i] += tau * r;
-                norm_local += r * r;
-            }
-
-            #pragma omp atomic
-            residual_norm += norm_local;
-        }
-        residual_norm = std::sqrt(residual_norm);
-        iter++;
-    }
-    std::cout << "Метод простой итерации (один parallel) завершился за " << iter << " итераций, норма = " << std::scientific << (residual_norm / b_norm) << "\n";
+    std::cout << "  Execution time: " << std::fixed << std::setprecision(6) << end_time << " s\n";
+    std::cout << "  Max error: " << std::scientific << max_err << "\n\n";
 }
 
-void run_omp_one(const std::vector<double>& A, const std::vector<double>& b, int n, double b_norm)
-{
-    std::vector<double> x(n, 0.0);
+void solve_omp_dyn_schedule(const std::vector<double>& matrix, const std::vector<double>& rhs, std::vector<double>& sol, int dim, const char* sched_type, double rhs_norm) {
+    const double param_tau = 0.01;
+    int step = 0;
+    double current_residual = 1.0;
 
-    double t = cpuSecond();
-    richardson_omp_one(A, b, x, n, b_norm);
-    t = cpuSecond() - t;
+    std::cout << "Testing schedule scheme: " << sched_type << "\n";
 
-    double max_err = 0.0;
-    for (int i = 0; i < n; i++){
-        if (std::fabs(x[i] - 1.0) > max_err) max_err = std::fabs(x[i] - 1.0);
-    }
-
-    std::cout << "Время выполнения (omp_one): " << std::fixed << std::setprecision(6) << t << " сек.\n";
-    std::cout << "Максимальная ошибка (omp_one): " << std::scientific << max_err << "\n\n";
-}
-//###########################################################################################################################################
-
-
-
-
-//###############################################РИЧАРДСОН С SCHEDULE########################################################################
-void richardson_omp_schedule(const std::vector<double>& A, const std::vector<double>& b, std::vector<double>& x, int n, const char* schedule_name, double b_norm)
-{
-    const double tau = 0.01;
-    int iter = 0;
-    double residual_norm = 1.0;
-
-    std::cout << "schedule = " << schedule_name << std::endl;
-
-    while (iter < MAX_ITER && (residual_norm / b_norm) > EPS) {
-        residual_norm = 0.0;
+    while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
+        current_residual = 0.0;
 
 #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
-        for (int i = 0; i < n; i++) {
-            double Ax = 0.0;
-            for (int j = 0; j < n; j++) {
-                Ax += A[i * n + j] * x[j];
+        for (int i = 0; i < dim; ++i) {
+            double mx = 0.0;
+            for (int j = 0; j < dim; ++j) {
+                mx += matrix[i * dim + j] * sol[j];
             }
-            double r = b[i] - Ax;
-            x[i] += tau * r;
+            sol[i] += param_tau * (rhs[i] - mx);
         }
 
-#pragma omp parallel for num_threads(NUM_THREADS)
-        for (int i = 0; i < n; i++) {
-            double r = b[i];
-            for (int j = 0; j < n; j++) {
-                r -= A[i * n + j] * x[j];
+#pragma omp parallel for num_threads(NUM_THREADS) reduction(+:current_residual)
+        for (int i = 0; i < dim; ++i) {
+            double diff = rhs[i];
+            for (int j = 0; j < dim; ++j) {
+                diff -= matrix[i * dim + j] * sol[j];
             }
-            double diff = r * r;
-#pragma omp atomic
-            residual_norm += diff;
+            current_residual += diff * diff;
         }
 
-        residual_norm = std::sqrt(residual_norm);
-        iter++;
+        current_residual = std::sqrt(current_residual);
+        step++;
     }
-    std::cout << "Завершился за " << iter << " итераций\n";
+    std::cout << "Finished in " << step << " iterations\n";
 }
 
-void run_schedule_test(const std::vector<double>& A, const std::vector<double>& b, int n, const char* schedule_name, double b_norm)
-{
-    std::vector<double> x(n, 0.0);
+void test_omp_schedule(const std::vector<double>& matrix, const std::vector<double>& rhs, int dim, const char* sched_type, double rhs_norm) {
+    std::vector<double> sol(dim, 0.0);
 
-
-    double t = cpuSecond();
-    richardson_omp_schedule(A, b, x, n, schedule_name, b_norm);
-    t = cpuSecond() - t;
+    double start_time = get_wall_time();
+    solve_omp_dyn_schedule(matrix, rhs, sol, dim, sched_type, rhs_norm);
+    double end_time = get_wall_time() - start_time;
 
     double max_err = 0.0;
-    for (int i = 0; i < n; i++){
-        if (std::fabs(x[i] - 1.0) > max_err) max_err = std::fabs(x[i] - 1.0);
+    for (int i = 0; i < dim; ++i) {
+        double err = std::fabs(sol[i] - 1.0);
+        if (err > max_err) max_err = err;
     }
 
-    std::cout << "Время выполнения (omp_schedule): " << std::fixed << std::setprecision(6) << t << " сек.\n";
-    std::cout << "Максимальная ошибка (omp_schedule): " << std::scientific << max_err << "\n\n";
+    std::cout << "  Execution time (" << sched_type << "): " << std::fixed << std::setprecision(6) << end_time << " s\n";
+    std::cout << "  Max error (" << sched_type << "): " << std::scientific << max_err << "\n\n";
 }
-//##########################################################################################################################################
 
+int main(int argc, char** argv) {
+    int dim = N_SIZE;
+    if (argc > 1) dim = std::atoi(argv[1]);
 
-
-int main(int argc, char** argv)
-{
-    int n = N_SIZE;
-    if (argc > 1) n = std::atoi(argv[1]);
-
-    int num_threads = NUM_THREADS;
-    char* env_threads = std::getenv("OMP_NUM_THREADS");
-    if (env_threads) num_threads = std::atoi(env_threads);
-
-    std::vector<double> A(n * n);
-    std::vector<double> b(n);
-
-    for (int i = 0; i < n; i++){
-        for (int j = 0; j < n; j++){
-            A[i * n + j] = (i == j) ? 2.0 : 1.0;
-        }
-        b[i] = n + 1;
+    int n_threads = NUM_THREADS;
+    if (const char* env_t = std::getenv("OMP_NUM_THREADS")) {
+        n_threads = std::atoi(env_t);
     }
 
-    double b_norm = 0.0;
-    for (double val : b) b_norm += val * val;
-    b_norm = std::sqrt(b_norm);
+    std::vector<double> matrix(dim * dim);
+    std::vector<double> rhs(dim);
 
-    std::cout << "Решение системы Ax=b методом простой итерации (Ричардсона)\n";
-    std::cout << "Размерность N = " << n << ", MAX_ITER = " << MAX_ITER << ", EPS = " << EPS << ", Потоков = " << num_threads << "\n\n";
+    for (int i = 0; i < dim; ++i) {
+        for (int j = 0; j < dim; ++j) {
+            matrix[i * dim + j] = (i == j) ? 2.0 : 1.0;
+        }
+        rhs[i] = dim + 1.0;
+    }
 
-    run_omp_separate(A, b, n, b_norm);
-    run_omp_one(A, b, n, b_norm);
+    double rhs_norm = 0.0;
+    for (double v : rhs) rhs_norm += v * v;
+    rhs_norm = std::sqrt(rhs_norm);
 
-    
-    std::cout << "=== Исследование schedule для метода Ричардсона ===\n";
-    std::cout << "N = " << n << " | Потоков = " << NUM_THREADS << "\n\n";
+    std::cout << "--- Richardson Iteration Solver ---\n";
+    std::cout << "Matrix dim (N) = " << dim << ", MAX_ITER = " << MAX_ITER << ", EPS = " << EPS << ", Threads = " << n_threads << "\n\n";
 
-    run_schedule_test(A, b, n, "static", b_norm);
-    run_schedule_test(A, b, n, "static,1", b_norm);
-    run_schedule_test(A, b, n, "static,32", b_norm);
-    run_schedule_test(A, b, n, "static,128", b_norm);
-    run_schedule_test(A, b, n, "dynamic", b_norm);
-    run_schedule_test(A, b, n, "dynamic,8", b_norm);
-    run_schedule_test(A, b, n, "dynamic,32", b_norm);
-    run_schedule_test(A, b, n, "guided", b_norm);
-    run_schedule_test(A, b, n, "guided,16", b_norm);
-    run_schedule_test(A, b, n, "auto", b_norm);
+    test_omp_split(matrix, rhs, dim, rhs_norm);
+    test_omp_single_region(matrix, rhs, dim, rhs_norm);
+
+    std::cout << "=== Evaluation of OpenMP Schedules ===\n";
+    std::cout << "N = " << dim << " | Thread Limit = " << NUM_THREADS << "\n\n";
+
+    const char* schedules[] = {
+        "static", "static,1", "static,32", "static,128",
+        "dynamic", "dynamic,8", "dynamic,32",
+        "guided", "guided,16", "auto"
+    };
+
+    for (const char* s : schedules) {
+        test_omp_schedule(matrix, rhs, dim, s, rhs_norm);
+    }
 
     return 0;
 }

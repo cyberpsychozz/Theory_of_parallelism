@@ -3,94 +3,88 @@
 #include <time.h>
 #include <omp.h>
 
-
 #ifndef NUM_THREADS
 #define NUM_THREADS 1
 #endif
 
-const double PI = 3.14159265358979323846;
-const double a = -4.0;
-const double b = 4.0;
-const int nsteps = 40000000;
+const double PI_CONST = 3.14159265358979323846;
+const double limit_a = -4.0;
+const double limit_b = 4.0;
+const int total_steps = 40000000;
 
-
-double cpuSecond()
-{
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return ((double)ts.tv_sec + (double)ts.tv_nsec * 1.e-9);
+double get_runtime() {
+    struct timespec t_spec;
+    timespec_get(&t_spec, TIME_UTC);
+    return ((double)t_spec.tv_sec + (double)t_spec.tv_nsec * 1.e-9);
 }
 
-double func(double x)
-{
-    return exp(-x * x);
+double math_function(double val) {
+    return exp(-val * val);
 }
 
-double integrate(double (*func)(double), double a, double b, int n)
-{
-    double h = (b - a) / n;
-    double sum = 0.0;
+double compute_integral_serial(double (*func_ptr)(double), double start, double end, int steps) {
+    double step_size = (end - start) / steps;
+    double accumulated_sum = 0.0;
 
-    for (int i = 0; i < n; i++)
-        sum += func(a + h * (i + 0.5));
+    for (int k = 0; k < steps; ++k) {
+        accumulated_sum += func_ptr(start + step_size * (k + 0.5));
+    }
 
-    sum *= h;
-
-    return sum;
+    return accumulated_sum * step_size;
 }
 
-double integrate_omp(double (*func)(double), double a, double b, int n)
-{
-    double h = (b - a) / n;
-    double sum = 0.0;
+double compute_integral_omp(double (*func_ptr)(double), double start, double end, int steps) {
+    double step_size = (end - start) / steps;
+    double accumulated_sum = 0.0;
 
 #pragma omp parallel num_threads(NUM_THREADS)
     {
-        int nthreads = omp_get_num_threads();
-        int threadid = omp_get_thread_num();
-        int items_per_thread = n / nthreads;
-        int lb = threadid * items_per_thread;
-        int ub = (threadid == nthreads - 1) ? (n - 1) : (lb + items_per_thread - 1);
-        double sumloc = 0.0;
+        int num_t = omp_get_num_threads();
+        int t_id = omp_get_thread_num();
+        int chunk = steps / num_t;
+        int lower_bound = t_id * chunk;
+        int upper_bound = (t_id == num_t - 1) ? (steps - 1) : (lower_bound + chunk - 1);
+        
+        double local_sum = 0.0;
 
-
-        for (int i = lb; i <= ub; i++)
-            sumloc += func(a + h * (i + 0.5));
+        for (int k = lower_bound; k <= upper_bound; ++k) {
+            local_sum += func_ptr(start + step_size * (k + 0.5));
+        }
 
         #pragma omp atomic
-        sum += sumloc;  
+        accumulated_sum += local_sum;  
     }
 
-    sum *= h;
-    return sum;
+    return accumulated_sum * step_size;
 }
 
-double run_serial()
-{
-    double t = cpuSecond();
-    double res = integrate(func, a, b, nsteps);
-    t = cpuSecond() - t;
-    printf("Result (serial): %.12f; error %.12f\n", res, fabs(res - sqrt(PI)));
-    return t;
+double eval_serial() {
+    double start_time = get_runtime();
+    double integral_res = compute_integral_serial(math_function, limit_a, limit_b, total_steps);
+    double duration = get_runtime() - start_time;
+    printf("[Serial] Result: %.12f; error: %.12f\n", integral_res, fabs(integral_res - sqrt(PI_CONST)));
+    return duration;
 }
-double run_parallel()
-{
-    double t = cpuSecond();
-    double res = integrate_omp(func, a, b, nsteps);
-    t = cpuSecond() - t;
-    printf("Result (parallel): %.12f; error %.12f\n", res, fabs(res - sqrt(PI)));
-    return t;
+
+double eval_parallel() {
+    double start_time = get_runtime();
+    double integral_res = compute_integral_omp(math_function, limit_a, limit_b, total_steps);
+    double duration = get_runtime() - start_time;
+    printf("[Parallel] Result: %.12f; error: %.12f\n", integral_res, fabs(integral_res - sqrt(PI_CONST)));
+    return duration;
 }
-int main(int argc, char **argv)
-{
-    printf("Integration f(x) on [%.12f, %.12f], nsteps = %d\n", a, b, nsteps);
-    printf("Запуск с %d потоками\n", NUM_THREADS);
 
-    double tserial = run_serial();
-    double tparallel = run_parallel();
+int main(int argc, char **argv) {
+    printf("--- Integral Calculation for exp(-x^2) ---\n");
+    printf("Range: [%.1f, %.1f], steps = %d\n", limit_a, limit_b, total_steps);
+    printf("Configured threads: %d\n\n", NUM_THREADS);
 
-    printf("Execution time (serial): %.6f\n", tserial);
-    printf("Execution time (parallel): %.6f\n", tparallel);
-    printf("Speedup: %.2f\n", tserial / tparallel);
+    double duration_serial = eval_serial();
+    double duration_parallel = eval_parallel();
+
+    printf("Time (serial implementation):   %.6f sec\n", duration_serial);
+    printf("Time (parallel implementation): %.6f sec\n", duration_parallel);
+    printf("Calculated speedup: %.2fx\n", duration_serial / duration_parallel);
+    
     return 0;
 }

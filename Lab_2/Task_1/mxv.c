@@ -3,10 +3,8 @@
 #include <time.h>
 #include <omp.h>
 
-
 #ifndef NUM_THREADS
 #define NUM_THREADS 40
-
 #endif
 
 #ifndef M_SIZE
@@ -17,144 +15,131 @@
 #define N_SIZE 40000
 #endif
 
-double t_serial, t_parallel;
+double duration_serial, duration_parallel;
 
-double cpuSecond()
-{
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return ((double)ts.tv_sec + (double)ts.tv_nsec * 1.e-9);
+double fetch_time() {
+    struct timespec t_spec;
+    timespec_get(&t_spec, TIME_UTC);
+    return ((double)t_spec.tv_sec + (double)t_spec.tv_nsec * 1.e-9);
 }
 
-/*
- * matrix_vector_product: Compute matrix-vector product c[m] = a[m][n] * b[n]
- */
-
-void matrix_vector_product(double *a, double *b, double *c, size_t m, size_t n)
-{
-    for (int i = 0; i < m; i++)
-    {
-        c[i] = 0.0;
-        for (int j = 0; j < n; j++)
-            c[i] += a[i * n + j] * b[j];
+void calc_mv_serial(double *mat, double *vec, double *res, size_t rows, size_t cols) {
+    for (int r = 0; r < rows; ++r) {
+        double temp_sum = 0.0;
+        for (int c = 0; c < cols; ++c) {
+            temp_sum += mat[r * cols + c] * vec[c];
+        }
+        res[r] = temp_sum;
     }
 }
 
-/*
-    matrix_vector_product_omp: Compute matrix-vector product c[m] = a[m][n] * b[n]
-*/
-void matrix_vector_product_omp(double *a, double *b, double *c, size_t m, size_t n)
-{
+void calc_mv_parallel(double *mat, double *vec, double *res, size_t rows, size_t cols) {
 #pragma omp parallel num_threads(NUM_THREADS)
     {
-        int nthreads = omp_get_num_threads();
-        int threadid = omp_get_thread_num();
-        int items_per_thread = m / nthreads;
-        int lb = threadid * items_per_thread;
-        int ub = (threadid == nthreads - 1) ? (m - 1) : (lb + items_per_thread - 1);
-        for (int i = lb; i <= ub; i++)
-        {
-            c[i] = 0.0;
-            for (int j = 0; j < n; j++)
-                c[i] += a[i * n + j] * b[j];
+        int total_threads = omp_get_num_threads();
+        int thread_id = omp_get_thread_num();
+        int chunk_size = rows / total_threads;
+        int start_row = thread_id * chunk_size;
+        int end_row = (thread_id == total_threads - 1) ? (rows - 1) : (start_row + chunk_size - 1);
+        
+        for (int r = start_row; r <= end_row; ++r) {
+            double temp_sum = 0.0;
+            for (int c = 0; c < cols; ++c) {
+                temp_sum += mat[r * cols + c] * vec[c];
+            }
+            res[r] = temp_sum;
         }
     }
 }
 
-void run_serial(size_t n, size_t m)
-{
-    double *a, *b, *c;
-    a = (double*)malloc(sizeof(*a) * m * n);
-    b = (double*)malloc(sizeof(*b) * n);
-    c = (double*)malloc(sizeof(*c) * m);
+void verify_serial(size_t cols, size_t rows) {
+    double *matrix = (double*)malloc(sizeof(*matrix) * rows * cols);
+    double *vector = (double*)malloc(sizeof(*vector) * cols);
+    double *result = (double*)malloc(sizeof(*result) * rows);
 
-    if (a == NULL || b == NULL || c == NULL)
-    {
-        free(a);
-        free(b);
-        free(c);
-        printf("Error allocate memory!\n");
-        exit(1);
+    if (!matrix || !vector || !result) {
+        free(matrix); free(vector); free(result);
+        fprintf(stderr, "Fatal: Out of memory!\n");
+        exit(EXIT_FAILURE);
     }
 
-    for (size_t i = 0; i < m; i++)
-    {
-        for (size_t j = 0; j < n; j++)
-            a[i * n + j] = i + j;
+    for (size_t r = 0; r < rows; ++r) {
+        for (size_t c = 0; c < cols; ++c) {
+            matrix[r * cols + c] = (double)(r + c);
+        }
     }
 
-    for (size_t j = 0; j < n; j++)
-        b[j] = j;
+    for (size_t c = 0; c < cols; ++c) {
+        vector[c] = (double)c;
+    }
 
-    t_serial = cpuSecond();
-    matrix_vector_product(a, b, c, m, n);
-    t_serial = cpuSecond() - t_serial;
+    duration_serial = fetch_time();
+    calc_mv_serial(matrix, vector, result, rows, cols);
+    duration_serial = fetch_time() - duration_serial;
 
-    printf("Elapsed time (serial): %.6f sec.\n", t_serial);
-    free(a);
-    free(b);
-    free(c);
+    printf("[Serial]   Time elapsed: %.6f seconds\n", duration_serial);
+    
+    free(matrix);
+    free(vector);
+    free(result);
 }
 
-void run_parallel(size_t n, size_t m)
-{
+void verify_parallel(size_t cols, size_t rows) {
+    double *matrix = (double*)malloc(sizeof(*matrix) * rows * cols);
+    double *vector = (double*)malloc(sizeof(*vector) * cols);
+    double *result = (double*)malloc(sizeof(*result) * rows);
 
-
-    double *a, *b, *c;
-
-    a = (double*)malloc(sizeof(*a) * m * n);
-    b = (double*)malloc(sizeof(*b) * n);
-    c = (double*)malloc(sizeof(*c) * m);
-
-    if (a == NULL || b == NULL || c == NULL)
-    {
-        free(a);
-        free(b);
-        free(c);
-        printf("Error allocate memory!\n");
-        exit(1);
+    if (!matrix || !vector || !result) {
+        free(matrix); free(vector); free(result);
+        fprintf(stderr, "Fatal: Out of memory!\n");
+        exit(EXIT_FAILURE);
     }
 
     #pragma omp parallel num_threads(NUM_THREADS)
     {
-        int nthreads = omp_get_num_threads();
-        int threadid = omp_get_thread_num();
-        int items_per_thread = m / nthreads;
-        int lb = threadid * items_per_thread;
-        int ub = (threadid == nthreads - 1) ? (m - 1) : (lb + items_per_thread - 1);
-        for (int i = lb; i <= ub; i++) {
-            for (int j = 0; j < n; j++)
-                a[i * n + j] = i + j;
-            c[i] = 0.0;
+        int total_threads = omp_get_num_threads();
+        int thread_id = omp_get_thread_num();
+        int chunk_size = rows / total_threads;
+        int start_row = thread_id * chunk_size;
+        int end_row = (thread_id == total_threads - 1) ? (rows - 1) : (start_row + chunk_size - 1);
+        
+        for (int r = start_row; r <= end_row; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                matrix[r * cols + c] = (double)(r + c);
+            }
+            result[r] = 0.0;
         }
     }
 
-    for (size_t j = 0; j < n; j++)  
-        b[j] = j;
-    
-    t_parallel = cpuSecond();
-    matrix_vector_product_omp(a, b, c, m, n);
-    t_parallel = cpuSecond() - t_parallel;
+    for (size_t c = 0; c < cols; ++c) {
+        vector[c] = (double)c;
+    }
 
-    printf("Elapsed time (parallel): %.6f sec.\n", t_parallel);
-    free(a);
-    free(b);
-    free(c);
+    duration_parallel = fetch_time();
+    calc_mv_parallel(matrix, vector, result, rows, cols);
+    duration_parallel = fetch_time() - duration_parallel;
+
+    printf("[Parallel] Time elapsed: %.6f seconds\n", duration_parallel);
+    
+    free(matrix);
+    free(vector);
+    free(result);
 }
 
-int main(int argc, char *argv[])
-{
-    size_t M = M_SIZE;
-    size_t N = N_SIZE;
+int main(int argc, char *argv[]) {
+    size_t rows_cnt = M_SIZE;
+    size_t cols_cnt = N_SIZE;
 
-    if (argc > 1) M = atoi(argv[1]);
-    if (argc > 2) N = atoi(argv[2]);
+    if (argc > 1) rows_cnt = (size_t)atol(argv[1]);
+    if (argc > 2) cols_cnt = (size_t)atol(argv[2]);
 
-    printf("Запуск с M = %zu, N = %zu, потоков = %d\n", M, N, NUM_THREADS);
+    printf("--- Matrix-Vector Product ---\n");
+    printf("Configuration: Matrix %zu x %zu, OpenMP threads = %d\n\n", rows_cnt, cols_cnt, NUM_THREADS);
 
-    run_serial(N, M);
-    run_parallel(N, M);
-    printf("Acceleration coeficient: %.6f\n", t_serial/t_parallel);
+    verify_serial(cols_cnt, rows_cnt);
+    verify_parallel(cols_cnt, rows_cnt);
+    
+    printf("\nOverall speedup factor: %.6fx\n", duration_serial / duration_parallel);
 
     return 0;
 }
