@@ -234,12 +234,14 @@ int main(int argc, char** argv) {
     std::vector<double> matrix(dim * dim);
     std::vector<double> rhs(dim);
 
+#pragma omp parallel for num_threads(NUM_THREADS)
     for (int i = 0; i < dim; ++i) {
         for (int j = 0; j < dim; ++j) {
             matrix[i * dim + j] = (i == j) ? 2.0 : 1.0;
         }
         rhs[i] = dim + 1.0;
     }
+
 
     double rhs_norm = 0.0;
     for (double v : rhs) rhs_norm += v * v;
