@@ -17,7 +17,7 @@ void multiply_chunk(const std::vector<double>& matrix, const std::vector<double>
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     // Размеры матрицы (rows x cols)
     constexpr int rows = 5000;
     constexpr int cols = 5000;
@@ -27,11 +27,14 @@ int main() {
     std::vector<double> vec(cols);
     std::vector<double> result(rows, 0.0);
 
-    // Определяем доступное количество потоков аппаратной среды
+    // Определяем доступное количество потоков
     unsigned int num_threads = std::thread::hardware_concurrency();
+    if (argc > 1) {
+        num_threads = std::stoi(argv[1]);
+    }
     if (num_threads == 0) num_threads = 4;
     
-    std::cout << "Start computing on " << num_threads << " threads...\n";
+    std::cout << "Threads: " << num_threads << "\n";
 
     // --- 1. Параллельная инициализация массивов ---
     auto start_init = std::chrono::high_resolution_clock::now();
