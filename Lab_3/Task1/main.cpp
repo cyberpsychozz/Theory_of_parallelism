@@ -100,11 +100,15 @@ int main(int argc, char* argv[]) {
     // --- Вывод времени работы и проверка корнер-кейсов ---
     std::chrono::duration<double> init_time = end_init - start_init;
     std::chrono::duration<double> mul_time = end_mul - start_mul;
+    double time = init_time.count() + mul_time.count();
+
 
     std::cout << "Initialization Time:   " << std::fixed << init_time.count() << " seconds\n";
     std::cout << "Multiplication Time:   " << std::fixed << mul_time.count() << " seconds\n";
     std::cout << "Sample result (0):     " << result[0] << "\n";
     std::cout << "Sample result (end):   " << result[rows - 1] << "\n";
+
+    std::cout << "Time" << time << std::endl;
 
     return 0;
 }
