@@ -50,33 +50,31 @@ private:
     std::unordered_map<size_t, std::shared_future<T>> shared_futures;
     std::mutex futures_mutex;
     
-    void work(std::stop_token token) {
-        while(true)
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            cv_tasks.wait(lock, [this, &token]() { 
-                return !tasks.empty() || token.stop_requested() || !is_running; 
-            });
-
-            bool should_stop = false;
+    void work(std::stop_token stop_tok) {
+        while (true) {
+            std::pair<int, Task> next_task;
             {
-                std::lock_guard<std::mutex> state_lock(state_mutex);
-                if (tasks.empty() && (token.stop_requested() || !is_running)) {
-                    should_stop = true;
+                std::unique_lock<std::mutex> q_lock(queue_mutex);
+                cv_tasks.wait(q_lock, [this, &stop_tok] {
+                    return !tasks.empty() || stop_tok.stop_requested() || !is_running;
+                });
+
+                bool active_flag;
+                {
+                    std::lock_guard<std::mutex> s_lock(state_mutex);
+                    active_flag = is_running;
                 }
-            }
 
-            if (should_stop) {
-                break;
-            }
-            if (!tasks.empty()) {
-                
-                auto [id, task] = std::move(tasks.front());
+                if (tasks.empty() && (stop_tok.stop_requested() || !active_flag)) {
+                    break;
+                }
+
+                if (tasks.empty()) continue;
+
+                next_task = std::move(tasks.front());
                 tasks.pop();
-                lock.unlock();
-                task();
-
             }
+            next_task.second();
         }
     }
 
@@ -117,37 +115,36 @@ public:
     }
 
     template <typename Func, typename... Args>
-    int add_task(Func&& func, Args&&... args) {
-
-        
-        auto promise = std::make_shared<std::promise<T>>();
-        std::future<T> future = promise->get_future();
-        auto shared_future = future.share();  
-
-        int cur_id = ++id;
+    int add_task(Func&& f, Args&&... args) {
+        auto p = std::make_shared<std::promise<T>>();
+        auto ftr_shared = p->get_future().share();
+        int task_id = ++id;
 
         {
-            std::lock_guard<std::mutex> lock(futures_mutex);
-            shared_futures.emplace(cur_id, shared_future);
+            std::lock_guard<std::mutex> f_lock(futures_mutex);
+            shared_futures.insert_or_assign(task_id, ftr_shared);
         }
 
+        auto executable = [
+            p,
+            func = std::forward<Func>(f),
+            ...params = std::forward<Args>(args)
+        ]() mutable {
+            if constexpr (std::is_same_v<T, void>) {
+                std::invoke(func, params...);
+                p->set_value();
+            } else {
+                p->set_value(std::invoke(func, params...));
+            }
+        };
+
         {
-            std::lock_guard<std::mutex> lock(queue_mutex);
-            tasks.emplace(std::pair{cur_id,[
-                promise,
-                function = std::forward<Func>(func),
-                 ...arguments = std::forward<Args>(args)]
-            ()mutable{
-                if constexpr (std::is_same_v<T, void>) {
-                    std::invoke(function, arguments...);
-                    promise->set_value();
-                } else {
-                    promise->set_value(std::invoke(function, arguments...));
-                }
-            }});
+            std::lock_guard<std::mutex> q_lock(queue_mutex);
+            tasks.push({task_id, std::move(executable)});
         }
+
         cv_tasks.notify_one();
-        return cur_id;
+        return task_id;
     }
 
 };
