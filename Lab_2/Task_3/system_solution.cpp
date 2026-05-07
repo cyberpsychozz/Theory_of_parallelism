@@ -67,44 +67,50 @@ void test_serial(const std::vector<double>& matrix, const std::vector<double>& r
     std::cout << "  Max error: " << std::scientific << max_err << "\n\n";
 }
 
-void solve_omp_split(const std::vector<double>& matrix, const std::vector<double>& rhs, std::vector<double>& sol, int dim, double rhs_norm) {
+void solve_omp_one_region(const std::vector<double>& matrix, const std::vector<double>& rhs, std::vector<double>& sol, int dim, double rhs_norm) {
     const double param_tau = 0.01;
     int step = 0;
     double current_residual = 1.0;
     int n_threads = omp_get_max_threads();
 
-    while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
-        current_residual = 0.0;
-
-#pragma omp parallel for num_threads(n_threads)
-        for (int i = 0; i < dim; ++i) {
-            double mx = 0.0;
-            for (int j = 0; j < dim; ++j) {
-                mx += matrix[i * dim + j] * sol[j];
+#pragma omp parallel num_threads(n_threads)
+    {
+        while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
+#pragma omp for
+            for (int i = 0; i < dim; ++i) {
+                double mx = 0.0;
+                for (int j = 0; j < dim; ++j) {
+                    mx += matrix[i * dim + j] * sol[j];
+                }
+                sol[i] += param_tau * (rhs[i] - mx);
             }
-            sol[i] += param_tau * (rhs[i] - mx);
-        }
 
-#pragma omp parallel for num_threads(n_threads) reduction(+:current_residual)
-        for (int i = 0; i < dim; ++i) {
-            double diff = rhs[i];
-            for (int j = 0; j < dim; ++j) {
-                diff -= matrix[i * dim + j] * sol[j];
+            double local_res = 0.0;
+#pragma omp for reduction(+:local_res)
+            for (int i = 0; i < dim; ++i) {
+                double diff = rhs[i];
+                for (int j = 0; j < dim; ++j) {
+                    diff -= matrix[i * dim + j] * sol[j];
+                }
+                local_res += diff * diff;
             }
-            current_residual += diff * diff;
-        }
 
-        current_residual = std::sqrt(current_residual);
-        step++;
+#pragma omp single
+            {
+                current_residual = std::sqrt(local_res);
+                step++;
+            }
+            // Барьер в конце single гарантирует, что все потоки увидят обновленный current_residual и step
+        }
     }
-    std::cout << "[OMP Split For] Completed in " << step << " iterations, rel_norm = " << std::scientific << (current_residual / rhs_norm) << "\n";
+    std::cout << "[OMP One Region] Completed in " << step << " iterations, rel_norm = " << std::scientific << (current_residual / rhs_norm) << "\n";
 }
 
-void test_omp_split(const std::vector<double>& matrix, const std::vector<double>& rhs, int dim, double rhs_norm) {
+void test_omp_one_region(const std::vector<double>& matrix, const std::vector<double>& rhs, int dim, double rhs_norm) {
     std::vector<double> sol(dim, 0.0);
 
     double start_time = get_wall_time();
-    solve_omp_split(matrix, rhs, sol, dim, rhs_norm);
+    solve_omp_one_region(matrix, rhs, sol, dim, rhs_norm);
     double end_time = get_wall_time() - start_time;
 
     double max_err = 0.0;
@@ -250,7 +256,7 @@ int main(int argc, char** argv) {
     std::cout << "--- Richardson Iteration Solver ---\n";
     std::cout << "Matrix dim (N) = " << dim << ", MAX_ITER = " << MAX_ITER << ", EPS = " << EPS << ", Threads = " << n_threads << "\n\n";
 
-    test_omp_split(matrix, rhs, dim, rhs_norm);
+    test_omp_one_region(matrix, rhs, dim, rhs_norm);
     test_omp_single_region(matrix, rhs, dim, rhs_norm);
 
     std::cout << "=== Evaluation of OpenMP Schedules ===\n";
