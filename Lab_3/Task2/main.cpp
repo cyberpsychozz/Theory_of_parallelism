@@ -53,17 +53,24 @@ private:
     void work(std::stop_token token) {
         while(true)
         {
-            // std::cout<<"wait"<<tasks.empty()<<std::endl;
             std::unique_lock<std::mutex> lock(queue_mutex);
             cv_tasks.wait(lock, [this, &token]() { 
                 return !tasks.empty() || token.stop_requested() || !is_running; 
             });
 
-            if (tasks.empty() && (token.stop_requested() || !is_running)) {
+            bool should_stop = false;
+            {
+                std::lock_guard<std::mutex> state_lock(state_mutex);
+                if (tasks.empty() && (token.stop_requested() || !is_running)) {
+                    should_stop = true;
+                }
+            }
+
+            if (should_stop) {
                 break;
             }
             if (!tasks.empty()) {
-                // move нужен чтобы переливать данные из очереди в поток, move нужен для сохранения памяти и в первую очередь потому что нельзя копировать promise и future
+                
                 auto [id, task] = std::move(tasks.front());
                 tasks.pop();
                 lock.unlock();
@@ -112,8 +119,7 @@ public:
     template <typename Func, typename... Args>
     int add_task(Func&& func, Args&&... args) {
 
-        // future и promise связаны невидимым каналом: future нужен чтобы получать результат, а promise чтобы его установить
-        // это удобно тк не приходится пользоваться лишними мьютексами для получения результата, а просто получить готовым через future
+        
         auto promise = std::make_shared<std::promise<T>>();
         std::future<T> future = promise->get_future();
         auto shared_future = future.share();  
@@ -141,9 +147,7 @@ public:
             }});
         }
         cv_tasks.notify_one();
-        // std::cout<<"add task"<<std::endl;
         return cur_id;
-        // return std::make_pair(cur_id, std::move(future));
     }
 
 };
@@ -173,7 +177,7 @@ void test() {
         double arg1, arg2, saved_res;
 
         if (line.substr(0, 3) == "Pow") {
-            // Формат: Pow x y = result id = ID
+
             ss >> type >> arg1 >> arg2 >> dummy >> saved_res >> id_label >> dummy >> id_val;
             double expected = std::pow(arg1, arg2);
             if (!check_double(saved_res, expected)) {
