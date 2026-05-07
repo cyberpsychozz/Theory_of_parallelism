@@ -129,18 +129,18 @@ void solve_omp_single_region(const std::vector<double>& matrix, const std::vecto
     double current_residual = 1.0;
     int n_threads = omp_get_max_threads();
 
-    while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
-        current_residual = 0.0;
-
 #pragma omp parallel num_threads(n_threads)
-        {
-            int t_count = omp_get_num_threads();
-            int t_id = omp_get_thread_num();
-            int chunk_size = dim / t_count;
-            int start_idx = t_id * chunk_size;
-            int end_idx = (t_id == t_count - 1) ? (dim - 1) : (start_idx + chunk_size - 1);
+    {
+        int t_count = omp_get_num_threads();
+        int t_id = omp_get_thread_num();
+        int chunk_size = dim / t_count;
+        int start_idx = t_id * chunk_size;
+        int end_idx = (t_id == t_count - 1) ? (dim - 1) : (start_idx + chunk_size - 1);
 
+        while (step < MAX_ITER && (current_residual / rhs_norm) > EPS) {
             double local_res = 0.0;
+            
+            // Расчет новой части решения и локальной невязки
             for (int i = start_idx; i <= end_idx; ++i) {
                 double mx = 0.0;
                 for (int j = 0; j < dim; ++j) {
@@ -151,11 +151,22 @@ void solve_omp_single_region(const std::vector<double>& matrix, const std::vecto
                 local_res += diff * diff;
             }
 
+            // Сборка общей невязки
+#pragma omp single
+            current_residual = 0.0; // Обнуляем перед суммированием
+
 #pragma omp atomic
             current_residual += local_res;
+
+#pragma omp barrier // Ждем все потоки, пока они закончат atomic
+
+#pragma omp single
+            {
+                current_residual = std::sqrt(current_residual);
+                step++;
+            }
+#pragma omp barrier // Ждем обновления step и current_residual перед началом новой итерации
         }
-        current_residual = std::sqrt(current_residual);
-        step++;
     }
     std::cout << "[OMP Single Region] Completed in " << step << " iterations, rel_norm = " << std::scientific << (current_residual / rhs_norm) << "\n";
 }
