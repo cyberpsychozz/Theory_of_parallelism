@@ -8,7 +8,7 @@ import cv2
 import torch
 from ultralytics import YOLO
 
-# минимальная уверенность модели. Если объект найден с уверенностью меньше 0.25, он может быть отброшен
+
 def process_frame(model, frame, imgsz=640, conf=0.25):
     with torch.inference_mode():
         results = model.predict(
@@ -36,9 +36,9 @@ def read_video(video_path):
     idx = 0
 
     while True:
-        ok, frame = cap.read()
+        ret, frame = cap.read()
 
-        if not ok:
+        if not ret:
             break
 
         frames.append((idx, frame))
@@ -229,7 +229,7 @@ def run_benchmark(video_path, output_path, model_path, max_workers):
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--video", required=True, help="Путь к входному видео")
+    parser.add_argument("--video", default="input.mp4", help="Путь к входному видео")
     parser.add_argument("--mode", required=True, choices=["single", "multi", "bench"])
     parser.add_argument("--output", required=True, help="Путь к выходному видео")
     parser.add_argument("--workers", type=int, default=2)
